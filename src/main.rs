@@ -157,7 +157,11 @@ fn time_traverse(conn: &Connection, start_row_id: u64, hops: u32) -> Result<u128
             .map(|x| x.vector.clone())
             .collect::<Vec<Vec<u8>>>();
         let random_nbr: usize = thr_rng.gen_range(0..nodes.len());
-        next_row_ids = nodes[random_nbr].adj_list.iter().map(|x| *x as u64).collect();
+        next_row_ids = nodes[random_nbr]
+            .adj_list
+            .iter()
+            .map(|x| *x as u64)
+            .collect();
     }
 
     Ok(now.elapsed().as_millis())
@@ -184,7 +188,6 @@ fn main() -> Result<()> {
         now.elapsed().as_millis()
     );
 
-
     let now = Instant::now();
     for i in 0..nvec {
         insert_graph_node(
@@ -205,6 +208,11 @@ fn main() -> Result<()> {
     for _ in 0..nsamples {
         total_time += time_traverse(&conn, start_row_id, hops)?;
     }
-    println!("Time for {} hops is {}ms based on {} samples", hops, total_time/nsamples, nsamples);
+    println!(
+        "Time for {} hops is {}ms based on {} samples",
+        hops,
+        total_time / nsamples,
+        nsamples
+    );
     Ok(())
 }
