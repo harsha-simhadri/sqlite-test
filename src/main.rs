@@ -24,7 +24,7 @@ impl std::fmt::Display for GraphNode {
     }
 }
 
-fn vec_u32_to_u8(vec: Vec<u32>) -> Vec<u8> {
+fn vec_u32_to_u8(vec: &Vec<u32>) -> Vec<u8> {
     let mut vec_u8: Vec<u8> = vec![];
     for x in vec {
         vec_u8.extend_from_slice(&x.to_le_bytes());
@@ -32,7 +32,7 @@ fn vec_u32_to_u8(vec: Vec<u32>) -> Vec<u8> {
     vec_u8
 }
 
-fn vec_u8_to_u32(vec: Vec<u8>) -> Vec<u32> {
+fn vec_u8_to_u32(vec: &Vec<u8>) -> Vec<u32> {
     let mut vec_u32: Vec<u32> = vec![];
     for i in 0..vec.len() / 4 {
         let mut bytes: [u8; 4] = [0; 4];
@@ -97,15 +97,19 @@ fn create_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn insert_graph_node(conn: &Connection, graph_node: GraphNode) -> Result<()> {
-    conn.execute(
-        "INSERT INTO IndexTable (guid, vector, adj_list) VALUES (?1, ?2, ?3)",
-        (
-            &graph_node.guid,
-            &(graph_node.vector),
-            vec_u32_to_u8(graph_node.adj_list),
-        ),
-    )?;
+fn insert_graph_nodes(conn: &mut Connection, graph_nodes: Vec<GraphNode>) -> Result<()> {
+    let tx = conn.transaction()?;
+    for graph_node in graph_nodes.iter() {
+        tx.execute(
+            "INSERT INTO IndexTable (guid, vector, adj_list) VALUES (?1, ?2, ?3)",
+            (
+                &graph_node.guid,
+                &(graph_node.vector),
+                vec_u32_to_u8(&graph_node.adj_list),
+            ),
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -115,7 +119,7 @@ fn print_table(conn: &Connection) -> Result<()> {
         Ok(GraphNode {
             guid: row.get(1)?,
             vector: row.get(2)?,
-            adj_list: vec_u8_to_u32(row.get(3)?),
+            adj_list: vec_u8_to_u32(&row.get(3)?),
         })
     })?;
 
@@ -134,7 +138,7 @@ fn get_nodes_by_row_id(conn: &Connection, row_ids: &Vec<u64>) -> Result<Vec<Grap
         Ok(GraphNode {
             guid: row.get(1)?,
             vector: row.get(2)?,
-            adj_list: vec_u8_to_u32(row.get(3)?),
+            adj_list: vec_u8_to_u32(&row.get(3)?),
         })
     })?;
 
@@ -169,12 +173,12 @@ fn time_traverse(conn: &Connection, start_row_id: u64, hops: u32) -> Result<u128
 
 fn main() -> Result<()> {
     //let conn = Connection::open_in_memory()?;
-    let conn = Connection::open("index.db")?;
+    let mut conn = Connection::open("index1M.db")?;
     create_table(&conn)?;
     conn.pragma_update(None, "journal_mode", &"WAL").unwrap();
 
     let ndim = 128;
-    let nvec = 10000;
+    let nvec = 1_000_000;
     let degree = 64;
     let radius = 100.0;
 
@@ -190,17 +194,20 @@ fn main() -> Result<()> {
     );
 
     let now = Instant::now();
-    for i in 0..nvec {
-        insert_graph_node(
-            &conn,
-            GraphNode {
+    let insert_batch_size = 1000;
+    for chunk_start in (0..nvec).step_by(insert_batch_size) {
+        let chunk_end = std::cmp::min(chunk_start + insert_batch_size, nvec);
+        let mut graph_nodes: Vec<GraphNode> = vec![];
+        for i in chunk_start..chunk_end {
+            graph_nodes.push(GraphNode {
                 guid: Some((i + 1) as u64),
                 vector: data[i].clone(),
                 adj_list: graph[i].clone(),
-            },
-        )?;
+            });
+        }
+        insert_graph_nodes(&mut conn, graph_nodes)?;
     }
-    println!("Inserted {} nodes in {}ms", nvec, now.elapsed().as_millis());
+    println!("Inserted {} nodes in {}ms using batches of size {}", nvec, now.elapsed().as_millis(), insert_batch_size);
 
     let start_row_id: u64 = 1;
     let hops: u32 = 50;
