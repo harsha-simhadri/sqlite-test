@@ -171,6 +171,7 @@ fn main() -> Result<()> {
     //let conn = Connection::open_in_memory()?;
     let conn = Connection::open("index.db")?;
     create_table(&conn)?;
+    conn.pragma_update(None, "journal_mode", &"WAL").unwrap();
 
     let ndim = 128;
     let nvec = 10000;
