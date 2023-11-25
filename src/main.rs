@@ -1,7 +1,9 @@
 use rand::Rng;
-use rand_distr::{Distribution, Normal};
 use rusqlite::{Connection, Result};
 use std::time::Instant;
+
+use utils::{generate_random_adj_list, generate_random_vecs, vec_u32_to_u8, vec_u64_to_set_str, vec_u8_to_u32};
+mod utils;
 
 #[derive(Debug)]
 struct GraphNode {
@@ -24,64 +26,6 @@ impl std::fmt::Display for GraphNode {
     }
 }
 
-fn vec_u32_to_u8(vec: &Vec<u32>) -> Vec<u8> {
-    let mut vec_u8: Vec<u8> = vec![];
-    for x in vec {
-        vec_u8.extend_from_slice(&x.to_le_bytes());
-    }
-    vec_u8
-}
-
-fn vec_u8_to_u32(vec: &Vec<u8>) -> Vec<u32> {
-    let mut vec_u32: Vec<u32> = vec![];
-    for i in 0..vec.len() / 4 {
-        let mut bytes: [u8; 4] = [0; 4];
-        bytes.copy_from_slice(&vec[i * 4..(i + 1) * 4]);
-        vec_u32.push(u32::from_le_bytes(bytes));
-    }
-    vec_u32
-}
-
-fn vec_u64_to_set_str(adj_list: &Vec<u64>) -> String {
-    let mut adj_list_str = "(".to_string();
-    let mut iter = adj_list.iter().peekable();
-    while let Some(x) = iter.next() {
-        adj_list_str.push_str(&format!(
-            "{}{}",
-            x,
-            if iter.peek().is_some() { ", " } else { ")" }
-        ));
-    }
-    adj_list_str
-}
-
-fn generate_random_vecs(ndim: usize, nvec: usize, radius: f32) -> Vec<Vec<u8>> {
-    assert!(radius > 0.0 && radius < 127.0);
-    let mut thr_rng = rand::thread_rng();
-    let normal: Normal<f32> = Normal::new(0.0, 1.0).unwrap();
-    let mut data: Vec<Vec<u8>> = Vec::with_capacity(nvec);
-    for _ in 0..nvec {
-        let vec: Vec<f32> = (0..ndim).map(|_| normal.sample(&mut thr_rng)).collect();
-        let norm = vec.iter().fold(0.0, |acc, x| acc + x * x).sqrt();
-        data.push(
-            vec.iter()
-                .map(|x| (((*x * radius) / norm) + 127.0) as u8)
-                .collect(),
-        );
-    }
-    data
-}
-
-fn generate_random_adj_list(nvec: usize, degree: usize) -> Vec<Vec<u32>> {
-    let mut thr_rng = rand::thread_rng();
-    (0..nvec)
-        .map(|_| {
-            (0..degree)
-                .map(|_| thr_rng.gen_range(0..nvec) as u32)
-                .collect()
-        })
-        .collect()
-}
 
 fn create_table(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -193,8 +137,9 @@ fn main() -> Result<()> {
         now.elapsed().as_millis()
     );
 
+    // Initialize table with a random graph of nvec nodes using batch insertions
     let now = Instant::now();
-    let insert_batch_size = 1000;
+    let insert_batch_size = 1_000;
     for chunk_start in (0..nvec).step_by(insert_batch_size) {
         let chunk_end = std::cmp::min(chunk_start + insert_batch_size, nvec);
         let mut graph_nodes: Vec<GraphNode> = vec![];
@@ -207,8 +152,14 @@ fn main() -> Result<()> {
         }
         insert_graph_nodes(&mut conn, graph_nodes)?;
     }
-    println!("Inserted {} nodes in {}ms using batches of size {}", nvec, now.elapsed().as_millis(), insert_batch_size);
+    println!(
+        "Inserted {} nodes in {}ms using batches of size {}",
+        nvec,
+        now.elapsed().as_millis(),
+        insert_batch_size
+    );
 
+    // Time traversal using many samples
     let start_row_id: u64 = 1;
     let hops: u32 = 50;
     let nsamples = 100;
@@ -217,10 +168,13 @@ fn main() -> Result<()> {
         total_time += time_traverse(&conn, start_row_id, hops)?;
     }
     println!(
-        "Time for {} hops is {}ms based on {} samples",
+        "Time for {} hops on {}-degree graph is {}ms based on {} samples",
         hops,
+        degree,
         total_time / nsamples,
         nsamples
     );
     Ok(())
+
+    // Add new rows and update existing rows with back pointers.
 }
