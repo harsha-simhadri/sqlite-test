@@ -49,12 +49,12 @@ pub fn generate_random_vecs(ndim: usize, nvec: usize, radius: f32) -> Vec<Vec<u8
     data
 }
 
-pub fn generate_random_adj_list(nvec: usize, degree: usize) -> Vec<Vec<u32>> {
+pub fn generate_random_adj_list(nvec: usize, degree: usize, max_idx: usize) -> Vec<Vec<u32>> {
     let mut thr_rng = rand::thread_rng();
     (0..nvec)
         .map(|_| {
             (0..degree)
-                .map(|_| thr_rng.gen_range(0..nvec) as u32)
+                .map(|_| thr_rng.gen_range(0..max_idx) as u32)
                 .collect()
         })
         .collect()
