@@ -17,8 +17,8 @@ mod utils;
 
 fn main() -> Result<()> {
     let ndim = 128;
-    let nvec = 10_000;
-    let degree = 64;
+    let nvec = 1_000_000;
+    let degree = 32;
     let radius = 100.0;
 
     // If index exists, remove it
@@ -63,10 +63,10 @@ fn main() -> Result<()> {
         insert_graph_nodes(&mut conn, graph_nodes)?;
     }
     println!(
-        "Inserted {} nodes in {}ms using batches of size {}",
+        "Inserted {} nodes using batches of size {} in {}ms ",
         nvec,
-        now.elapsed().as_millis(),
-        insert_batch_size
+        insert_batch_size,
+        now.elapsed().as_millis()
     );
 
     // Time traversal using many samples
@@ -78,16 +78,16 @@ fn main() -> Result<()> {
         traverse(&conn, start_row_id, hops)?;
     }
     println!(
-        "Time for {} hops on {}-degree graph is {}ms based on {} samples",
+        "Traversed {} hops on {}-degree graph on {} samples averaging {}ms",
         hops,
         degree,
+        nsamples,
         now.elapsed().as_millis() / nsamples,
-        nsamples
     );
 
     // Add new nodes with back edges
     let now: Instant = Instant::now();
-    let num_new_nodes = 10;
+    let num_new_nodes = 100;
     for _ in 0..num_new_nodes {
         let num_rows = get_num_rows(&conn).unwrap();
         let new_guid = 1 + num_rows;
@@ -99,25 +99,24 @@ fn main() -> Result<()> {
                 adj_list: generate_random_adj_list(degree, num_rows as usize),
             },
         )?;
-    }
-    println!(
-        "Inserted {} new nodes with back edges in {}ms",
-        num_new_nodes,
-        now.elapsed().as_millis()
-    );
 
-    // Make sure back edges were added for new nodes
-    let num_rows = get_num_rows(&conn).unwrap();
-    let nodes = get_nodes_by_row_id(&conn, &(num_rows + 1 - num_new_nodes..num_rows).collect());
-    for node in nodes.unwrap() {
-        let nghrs =
-            get_nodes_by_row_id(&conn, &node.adj_list.iter().map(|x| *x as u64).collect()).unwrap();
-        for ngbr in nghrs {
-            assert!(ngbr.adj_list.contains(&(node.guid.unwrap() as u32)));
-            // This test will fail occasionally even if all code is correct because of random collisions
+        if cfg!(debug_assertions) {
+            let new_node = &get_nodes_by_row_id(&conn, &vec![new_guid])?[0];
+            let nghr_nodes = get_nodes_by_row_id(
+                &conn,
+                &new_node.adj_list.iter().map(|x| *x as u64).collect(),
+            )?;
+            for nghr in nghr_nodes {
+                debug_assert!(nghr.adj_list.contains(&(new_guid as u32)));
+            }
         }
     }
-    println!("Back edge check OK.");
+    println!(
+        "Inserted {} new nodes with {} back edges in avg of {}ms",
+        num_new_nodes,
+        degree,
+        now.elapsed().as_millis() / num_new_nodes as u128
+    );
 
     Ok(())
 }
