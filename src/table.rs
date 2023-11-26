@@ -51,7 +51,7 @@ pub fn print_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn get_nodes_by_row_id(conn: &Connection, row_ids: &Vec<u64>) -> Result<Vec<GraphNode>> {
+pub fn get_nodes_by_row_id(conn: &Connection, row_ids: &Vec<u64>) -> Result<Vec<GraphNode>> {
     let mut statement_str =
         "SELECT vertex_id, guid, vector, adj_list FROM IndexTable WHERE rowid IN".to_string();
     statement_str.push_str(&vec_u64_to_set_str(row_ids));
@@ -88,5 +88,54 @@ pub fn traverse(conn: &Connection, start_row_id: u64, hops: u32) -> Result<()> {
             .map(|x| *x as u64)
             .collect();
     }
+    Ok(())
+}
+
+pub fn get_num_rows(conn: &Connection) -> Result<u64> {
+    let mut stmt = conn.prepare("SELECT COUNT(*) FROM IndexTable")?;
+    let mut iter = stmt.query_map([], |row| Ok(row.get(0)?))?;
+    iter.next().unwrap()
+}
+
+pub fn insert_graph_node_with_back_edges(
+    conn: &mut Connection,
+    graph_node: GraphNode,
+) -> Result<()> {
+    let back_edges = graph_node
+        .adj_list
+        .iter()
+        .map(|x| (*x as u64, graph_node.guid.unwrap() as u32))
+        .collect::<Vec<(u64, u32)>>();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO IndexTable (guid, vector, adj_list) VALUES (?1, ?2, ?3)",
+        (
+            &graph_node.guid,
+            &(graph_node.vector),
+            vec_u32_to_u8(&graph_node.adj_list),
+        ),
+    )?;
+    for (back_edge_guid, back_edge_idx) in back_edges.iter() {
+        // read adj_list from back_edge_guid
+        let mut stmt =
+            tx.prepare("SELECT vertex_id, guid, vector, adj_list FROM IndexTable WHERE guid = ?1")?;
+        let mut node_iter = stmt.query_map([back_edge_guid], |row| {
+            Ok(GraphNode {
+                guid: row.get(1)?,
+                vector: row.get(2)?,
+                adj_list: vec_u8_to_u32(&row.get(3)?),
+            })
+        })?;
+
+        let mut adj_list = node_iter.next().unwrap()?.adj_list;
+        let random_idx: usize = rand::thread_rng().gen_range(0..adj_list.len());
+        adj_list[random_idx] = *back_edge_idx;
+        // update back_edge_guid with new back_edge_adj_list
+        tx.execute(
+            "UPDATE IndexTable SET adj_list = ?1 WHERE rowid = ?2",
+            (vec_u32_to_u8(&adj_list), back_edge_guid),
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }

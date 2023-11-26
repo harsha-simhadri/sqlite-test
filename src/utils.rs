@@ -49,7 +49,18 @@ pub fn generate_random_vecs(ndim: usize, nvec: usize, radius: f32) -> Vec<Vec<u8
     data
 }
 
-pub fn generate_random_adj_list(nvec: usize, degree: usize, max_idx: usize) -> Vec<Vec<u32>> {
+pub fn generate_random_vec(ndim: usize, radius: f32) -> Vec<u8> {
+    assert!(radius > 0.0 && radius < 127.0);
+    let mut thr_rng = rand::thread_rng();
+    let normal: Normal<f32> = Normal::new(0.0, 1.0).unwrap();
+    let vec: Vec<f32> = (0..ndim).map(|_| normal.sample(&mut thr_rng)).collect();
+    let norm = vec.iter().fold(0.0, |acc, x| acc + x * x).sqrt();
+    vec.iter()
+        .map(|x| (((*x * radius) / norm) + 127.0) as u8)
+        .collect()
+}
+
+pub fn generate_random_adj_lists(nvec: usize, degree: usize, max_idx: usize) -> Vec<Vec<u32>> {
     let mut thr_rng = rand::thread_rng();
     (0..nvec)
         .map(|_| {
@@ -57,5 +68,12 @@ pub fn generate_random_adj_list(nvec: usize, degree: usize, max_idx: usize) -> V
                 .map(|_| thr_rng.gen_range(0..max_idx) as u32)
                 .collect()
         })
+        .collect()
+}
+
+pub fn generate_random_adj_list(degree: usize, max_idx: usize) -> Vec<u32> {
+    let mut thr_rng = rand::thread_rng();
+    (0..degree)
+        .map(|_| thr_rng.gen_range(0..max_idx) as u32)
         .collect()
 }
